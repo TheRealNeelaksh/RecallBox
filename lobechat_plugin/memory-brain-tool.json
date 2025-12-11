@@ -1,0 +1,50 @@
+{
+  "name": "memory_brain",
+  "description": "Local Memory Search Engine. Allows LobeChat to mount a drive, scan files, and search memories.",
+  "functions": [
+    {
+      "name": "mount_drive",
+      "description": "Mounts a directory containing photos so it can be indexed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "scan_drive",
+      "description": "Scans the mounted directory for photos and indexes them.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "search_memories",
+      "description": "Search for memories using natural language.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "top_k": { "type": "number", "default": 5 }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_memory",
+      "description": "Retrieve full metadata for a memory entry.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_id": { "type": "string" }
+        },
+        "required": ["file_id"]
+      }
+    }
+  ]
+}
