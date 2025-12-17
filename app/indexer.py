@@ -3,6 +3,8 @@ import os
 import hashlib
 import io
 import uuid
+import base64
+import json
 from pathlib import Path
 from PIL import Image, ImageOps
 import pytesseract
@@ -58,9 +60,10 @@ def datetime_iso(path: Path):
     ct = getattr(st, "st_ctime", st.st_mtime)
     return datetime.fromtimestamp(ct).isoformat()
 
-def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None):
+def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, vision_config=None):
     """
     Walk root for supported image files. Insert new entries into DB.
+    vision_config: optional tuple (adapter, model_name)
     Returns (added, skipped)
     """
     cur = conn.cursor()
@@ -71,6 +74,12 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None):
                 files.append(Path(dp) / fn)
     added = 0
     skipped = 0
+
+    # Pre-fetch vision config if passed
+    adapter, vision_model_name = (None, None)
+    if vision_config:
+        adapter, vision_model_name = vision_config
+
     for p in tqdm(files, desc="scan"):
         try:
             h = file_hash(p)
@@ -83,25 +92,59 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None):
         if row and not rebuild:
             skipped += 1
             continue
+
         # process
         ocr = do_ocr(p)
         fname = p.stem
         caption = fname
-        summary = summarize_text(ocr, fname)
+
+        # Vision Processing
+        vision_json_str = None
+        vision_status = None
+        summary = None
+
+        if adapter and vision_model_name:
+            try:
+                # Read image as b64 for vision
+                with open(p, "rb") as f:
+                    ibytes = f.read()
+                b64 = base64.b64encode(ibytes).decode("utf-8")
+
+                # Predict
+                v_result = adapter.predict(vision_model_name, b64)
+
+                # Success
+                vision_json_str = json.dumps(v_result.model_dump())
+                vision_status = "processed"
+                summary = v_result.summary
+
+            except Exception as e:
+                # Failure logic: Log, mark failed, fallback
+                print(f"Vision failed for {p.name}: {e}")
+                vision_status = "failed"
+                vision_json_str = None
+                summary = None # fallback will be triggered
+
+        if not summary:
+            summary = summarize_text(ocr, fname)
+
         emb_text = " ".join([caption, summary, ocr])
+
         try:
             emb = model.encode(emb_text).astype("float32")
         except Exception:
             emb = np.zeros((384,), dtype="float32")
+
         thumb = make_thumbnail_bytes(p)
         fid = str(uuid.uuid4())
         created = datetime_iso(p)
         modified = datetime_iso(p)
+
         cur.execute("""
             INSERT OR REPLACE INTO memories
-            (file_id, path, hash, created_at, modified_at, exif_date, ocr_text, caption, memory_summary, tags, embedding, thumbnail)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (fid, str(p), h, created, modified, None, ocr, caption, summary, "", emb.tobytes(), thumb))
+            (file_id, path, hash, created_at, modified_at, exif_date, ocr_text, caption, memory_summary, tags, embedding, thumbnail, vision_json, vision_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (fid, str(p), h, created, modified, None, ocr, caption, summary, "", emb.tobytes(), thumb, vision_json_str, vision_status))
         conn.commit()
         added += 1
         # incrementally add to faiss if provided
