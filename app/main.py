@@ -19,6 +19,7 @@ from datetime import datetime
 from .db import init_db, row_to_dict
 from .indexer import scan_and_index
 from .faiss_mgr import FaissManager
+from .vision.adapter import VisionAdapter
 
 APP_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="Memory Brain - Phase1")
@@ -32,7 +33,8 @@ state = {
     "db_path": None,
     "conn": None,
     "faiss": None,
-    "embed_model": None
+    "embed_model": None,
+    "vision_adapter": None
 }
 
 # Simple boot
@@ -65,6 +67,22 @@ def mount(req: MountRequest):
     cur = conn.cursor()
     cur.execute("SELECT COUNT(1) FROM memories")
     count = cur.fetchone()[0]
+
+    # Init Vision Adapter from config if exists
+    cur.execute("SELECT endpoint, api_key, vendor, model FROM vision_config WHERE id=1")
+    row = cur.fetchone()
+    if row:
+        endpoint, api_key, vendor, model = row
+        # We rely on adapter auto-detect but we could pass cached vendor too?
+        # The adapter auto-detects.
+        try:
+            adapter = VisionAdapter(endpoint, api_key)
+            if adapter.vendor:
+                state["vision_adapter"] = adapter
+                print(f"Vision adapter initialized with {vendor} ({endpoint})")
+        except Exception as e:
+            print(f"Failed to init vision adapter from config: {e}")
+
     return {"status": "ok", "db_path": str(db_path), "count": count}
 
 class ScanRequest(BaseModel):
@@ -83,7 +101,21 @@ def scan(req: ScanRequest):
         raise HTTPException(status_code=400, detail="scan path does not exist")
     conn = state["conn"] or init_db(str(base.joinpath(".memory_index.db")))
     model = state["embed_model"]
-    added, skipped = scan_and_index(base, conn, model, rebuild=req.rescan, faiss_mgr=state.get("faiss"))
+
+    # Reload adapter from state if available
+    vision_adapter = state.get("vision_adapter")
+    # Also need the selected model name which is in DB but not in adapter object (adapter handles connection)
+    # The scan_and_index function needs to know WHICH model to use.
+    # We should pass a tuple or object to scan_and_index: (adapter, model_name)
+    vision_config = None
+    if vision_adapter:
+        cur = conn.cursor()
+        cur.execute("SELECT model FROM vision_config WHERE id=1")
+        row = cur.fetchone()
+        if row:
+            vision_config = (vision_adapter, row[0])
+
+    added, skipped = scan_and_index(base, conn, model, rebuild=req.rescan, faiss_mgr=state.get("faiss"), vision_config=vision_config)
     # After scan, ensure FAISS rebuilt if needed
     if state.get("faiss"):
         state["faiss"].build_from_db(conn)
@@ -181,3 +213,78 @@ def memory(file_id: str):
 @app.get("/health")
 def health():
     return {"status": "ok", "mounted_path": state.get("mounted_path")}
+
+# --- Vision Configuration ---
+
+class VisionConfigPayload(BaseModel):
+    endpoint: str
+    api_key: Optional[str] = None
+    model: str
+
+@app.get("/config/vision")
+def get_vision_config():
+    if not state.get("conn"):
+        raise HTTPException(status_code=400, detail="No DB loaded")
+    c = state["conn"].cursor()
+    c.execute("SELECT endpoint, api_key, vendor, model, last_validated_at FROM vision_config WHERE id=1")
+    row = c.fetchone()
+    if not row:
+        return {}
+    return {
+        "endpoint": row[0],
+        "api_key": row[1],
+        "vendor": row[2],
+        "model": row[3],
+        "last_validated_at": row[4]
+    }
+
+@app.post("/config/vision")
+def set_vision_config(cfg: VisionConfigPayload):
+    if not state.get("conn"):
+        raise HTTPException(status_code=400, detail="No DB loaded")
+
+    # 1. Instantiate Adapter
+    try:
+        adapter = VisionAdapter(cfg.endpoint, cfg.api_key)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to connect to endpoint: {e}")
+
+    if not adapter.vendor:
+        raise HTTPException(status_code=400, detail="Could not detect compatible vision vendor at endpoint")
+
+    # 2. Test Gate
+    # Load test_thumb.jpg from root
+    test_img_path = Path("test_thumb.jpg")
+    if not test_img_path.exists():
+        # Fallback if running from app dir?
+        test_img_path = Path("../test_thumb.jpg")
+
+    if not test_img_path.exists():
+         raise HTTPException(status_code=500, detail="Internal error: test_thumb.jpg missing")
+
+    with open(test_img_path, "rb") as f:
+        img_bytes = f.read()
+
+    b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+    try:
+        print(f"Running test gate on model {cfg.model}...")
+        result = adapter.predict(cfg.model, b64)
+        # Validation is implicit in predict via contract
+    except Exception as e:
+        print(f"Vision test failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Vision model failed test gate: {e}")
+
+    # 3. Save to DB
+    c = state["conn"].cursor()
+    vendor_name = adapter.vendor.__class__.__name__
+    now = datetime.now().isoformat()
+
+    c.execute("INSERT OR REPLACE INTO vision_config (id, endpoint, api_key, vendor, model, last_validated_at) VALUES (1, ?, ?, ?, ?, ?)",
+              (cfg.endpoint, cfg.api_key, vendor_name, cfg.model, now))
+    state["conn"].commit()
+
+    # Update runtime state
+    state["vision_adapter"] = adapter
+
+    return {"status": "ok", "message": "Vision configuration saved and verified"}
