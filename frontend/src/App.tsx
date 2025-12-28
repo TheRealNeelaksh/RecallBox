@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Brain, LayoutGrid, Clock, BookOpen, ListChecks } from 'lucide-react';
+import { Brain, LayoutGrid, Clock, BookOpen, ListChecks, Settings } from 'lucide-react';
 import { DriveSelector } from './components/DriveSelector';
 import { ScanControls } from './components/ScanControls';
 import { SearchBar } from './components/SearchBar';
@@ -8,6 +8,7 @@ import { MemoryDetail } from './components/MemoryDetail';
 import { TimelineView } from './components/TimelineView';
 import { FiltersPanel } from './components/FiltersPanel';
 import { ChronicleView } from './components/ChronicleView';
+import { VisionConfig } from './components/VisionConfig';
 import { memoryApi, type Memory } from './api/memoryApi';
 import clsx from 'clsx';
 
@@ -19,6 +20,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [showConfig, setShowConfig] = useState(false);
 
   // Selection Logic
   const [selectionMode, setSelectionMode] = useState(false);
@@ -99,7 +101,7 @@ function App() {
             <div className="bg-blue-600 p-2 rounded-lg">
               <Brain className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-gray-900">Memory Brain</h1>
+            <h1 className="text-xl font-bold tracking-tight text-gray-900">RecallBox <span className="text-xs font-normal text-gray-500 ml-1">Phase 1.5</span></h1>
           </div>
 
           <div className="flex items-center gap-4">
@@ -107,6 +109,16 @@ function App() {
                <div className="text-sm text-gray-500 font-mono hidden sm:block bg-gray-100 px-2 py-1 rounded">
                  {mountedPath}
                </div>
+             )}
+
+             {mountedPath && (
+               <button
+                onClick={() => setShowConfig(true)}
+                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors"
+                title="Configure Vision"
+               >
+                 <Settings className="w-5 h-5" />
+               </button>
              )}
           </div>
         </div>
@@ -203,6 +215,9 @@ function App() {
         </div>
 
       </main>
+
+      {/* Config Modal */}
+      {showConfig && <VisionConfig onClose={() => setShowConfig(false)} />}
 
       {/* Detail Modal */}
       {selectedMemoryId && (

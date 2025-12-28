@@ -7,9 +7,11 @@ export interface Memory {
   path: string;
   score?: number;
   summary?: string;
+  tags?: string;
+  vision_status?: string;
   exif_date?: string;
   thumbnail_b64?: string;
-  created_at?: string; // Added created_at
+  created_at?: string;
 }
 
 export interface MemoryDetail {
@@ -23,6 +25,8 @@ export interface MemoryDetail {
   caption: string;
   memory_summary: string;
   tags: string;
+  vision_json?: string;
+  vision_status?: string;
 }
 
 export interface SearchResponse {
@@ -40,6 +44,17 @@ export interface MountResponse {
   status: string;
   db_path: string;
   count: number;
+}
+
+export interface VisionConfig {
+    endpoint_url: string;
+    model_name: string;
+    api_key?: string;
+}
+
+export interface ConfigTestResponse {
+    status: string;
+    details: string;
 }
 
 export const memoryApi = {
@@ -99,5 +114,38 @@ export const memoryApi = {
 
   getThumbnailUrl(file_id: string): string {
     return `${API_BASE}/thumbnail/${file_id}`;
+  },
+
+  // --- Vision Config ---
+
+  async getVisionConfig(): Promise<VisionConfig> {
+      const res = await fetch(`${API_BASE}/config/vision`);
+      if (!res.ok) {
+           // Allow 400 if not mounted, return empty
+           if(res.status === 400) return {endpoint_url: "", model_name: ""};
+           throw new Error('Failed to load vision config');
+      }
+      return res.json();
+  },
+
+  async setVisionConfig(cfg: VisionConfig): Promise<void> {
+      const res = await fetch(`${API_BASE}/config/vision`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(cfg)
+      });
+      if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Failed to save config');
+      }
+  },
+
+  async testVisionConfig(cfg: VisionConfig): Promise<ConfigTestResponse> {
+      const res = await fetch(`${API_BASE}/config/vision/test`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(cfg)
+      });
+      return res.json();
   }
 };

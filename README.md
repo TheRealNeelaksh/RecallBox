@@ -1,288 +1,108 @@
-# **RecallBox – Local AI-Powered Photo & File Memory Engine**
-
-RecallBox is a local, privacy-preserving search engine that lets you scan folders of images, extract text + visual meaning using embeddings, and instantly search them semantically. No cloud, no telemetry — your machine becomes your personal memory engine.
-
----
-
-# **Table of Contents**
-
-* [Features](#features)
-* [Architecture Overview](#architecture-overview)
-* [Installation](#installation)
-* [Running the Server](#running-the-server)
-* [API Endpoints](#api-endpoints)
-* [Workflow Example](#workflow-example)
-* [Project Structure](#project-structure)
-* [Roadmap](#roadmap)
-* [License](#license)
-
----
+# RecallBox - Phase 1.5
 
-# **Features**
+RecallBox is a local-first memory indexing system designed to make your visual history searchable by *scene* and *content*, not just date.
 
-Phase 1 delivers a stable, fully functional backend:
+## Phase 1.5: Scene-Based Visual Memory
 
-### **Core**
+Phase 1.5 introduces "Scene Understanding". Instead of just reading text (OCR), the system uses a local Vision LLM (like Ollama or LM Studio) to look at your images and describe them.
 
-* FastAPI backend with clean modular structure
-* Local folder mounting
-* Scanning & indexing of image files
-* SHA256 hashing to prevent duplicates
-* OCR extraction using **pytesseract**
-* Thumbnail generation (PIL)
-* Embedding generation using **sentence-transformers (all-MiniLM-L6-v2)**
-* FAISS in-memory vector search
-* SQLite local data store (`.memory_index.db`)
+This allows you to search for things like:
+- "friends playing cards"
+- "sunny day at the beach"
+- "receipt for coffee"
 
-### **API**
+### Prerequisites
 
-* `/mount` — prepare a folder for indexing
-* `/scan` — analyze folder contents and index new files
-* `/search` — semantic search via embeddings
-* `/thumbnail/{file_id}` — return stored thumbnail
-* `/memory` — debugging endpoint for index info
-* `/health` — quick readiness test
+1.  **Python 3.10+**
+2.  **Node.js 18+**
+3.  **Local Vision LLM** (Ollama or LM Studio)
 
-Everything runs **offline**, locally, and fast.
+### Setup Guide
 
----
+#### 1. Start the Vision LLM
 
-# **Architecture Overview**
+You need a local LLM running that supports vision (image input).
 
-```
-                +---------------------------+
-                |         FastAPI           |
-                +------------+--------------+
-                             |
-                             v
-        +--------------------------------------------+
-        |                Indexer                     |
-        |--------------------------------------------|
-        | - File scanning                            |
-        | - SHA256 hashing                           |
-        | - OCR (pytesseract)                        |
-        | - Thumbnails (PIL)                         |
-        | - Embeddings (sentence-transformers)       |
-        +--------------------------------------------+
-                             |
-                             v
-        +--------------------------------------------+
-        |               SQLite DB                    |
-        |  file_id | path | hash | summary | ...     |
-        +--------------------------------------------+
-                             |
-                             v
-        +--------------------------------------------+
-        |                FAISS Manager               |
-        |  In-memory vector index for fast search    |
-        +--------------------------------------------+
-```
+**Option A: Ollama (Recommended)**
 
-Each scan updates both the **SQLite metadata** and the **FAISS vector index**, giving you instant semantic search.
+1.  Install [Ollama](https://ollama.com/).
+2.  Pull a vision model. We recommend `llava` or `moondream` for speed.
+    ```bash
+    ollama pull llava
+    ```
+3.  Start the server (usually runs automatically on port 11434).
 
----
+**Option B: LM Studio**
 
-# **Installation**
+1.  Install [LM Studio](https://lmstudio.ai/).
+2.  Load a vision-capable model (e.g., `BakLLaVA`, `Obsidian`, `LLaVA`).
+3.  Start the Local Server on port `1234`.
 
-### **1. Clone the repository**
+#### 2. Start the Backend
 
-```bash
-git clone https://github.com/<your-username>/RecallBox
-cd RecallBox
-```
+1.  Install dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+    *(Note: Ensure `httpx`, `pillow`, `sentence-transformers`, `faiss-cpu`, `fastapi`, `uvicorn` are installed)*
 
-### **2. Create a virtual environment**
+2.  Run the server:
+    ```bash
+    uvicorn app.main:app --port 5500 --reload
+    ```
 
-```bash
-python -m venv venv
-source venv/bin/activate       # macOS/Linux
-venv\Scripts\activate          # Windows
-```
+#### 3. Start the Frontend
 
-### **3. Install dependencies**
+1.  Navigate to `frontend/`:
+    ```bash
+    cd frontend
+    npm install
+    npm run dev
+    ```
+2.  Open `http://localhost:5173`.
 
-```bash
-pip install -r requirements.txt
-```
+### Configuration & Usage
 
-### **4. (Windows only) Install Tesseract**
+1.  **Mount a Drive:**
+    - In the UI, enter the absolute path to a folder of images you want to index.
+    - Click "Mount".
 
-Download:
-[https://github.com/tesseract-ocr/tesseract](https://github.com/tesseract-ocr/tesseract)
+2.  **Configure Vision:**
+    - Click the **Settings (Gear)** icon in the header.
+    - **Endpoint:**
+        - For Ollama: `http://localhost:11434`
+        - For LM Studio: `http://localhost:1234`
+    - **Model Name:**
+        - For Ollama: `llava`
+        - For LM Studio: Matches the loaded model ID.
+    - Click **"Test Connection"** to verify.
+    - Click **"Save Configuration"**.
 
-Make sure `tesseract.exe` is in your PATH.
+3.  **Scan & Index:**
+    - Click "Scan Drive".
+    - The system will iterate through your images.
+    - It sends each image to the local LLM to generate a summary and tags.
+    - *Note: This is slower than Phase 1 because it relies on the LLM speed.*
 
----
+4.  **Search:**
+    - Type "two people sitting on a bench".
+    - The backend (optionally) expands this query using the LLM to better match scene descriptions.
+    - Results appear with summaries and tags.
 
-# **Running the Server**
+5.  **Inspect:**
+    - Click any image.
+    - Switch to the **"Vision Inspection"** tab.
+    - You will see the raw JSON output from the LLM ("Why did it think this?").
 
-Start the backend:
+### Troubleshooting
 
-```bash
-uvicorn app.main:app --reload --host 127.0.0.1 --port 5500
-```
+-   **Vision Failed?** Check the "Vision Inspection" tab on the image. It will show the error status.
+-   **No Results?** Ensure you clicked "Scan" *after* configuring vision. If you scanned before configuring, click "Rescan" to re-process images.
+-   **Slow?** Vision inference is computationally expensive. Ensure you have GPU acceleration enabled in Ollama/LM Studio if available.
 
-Open the API docs:
+### Architecture Notes
 
-```
-http://127.0.0.1:5500/docs
-```
+-   **Backend:** FastAPI + SQLite + FAISS (Vector Search).
+-   **Vision Adapter:** Located in `app/vision/adapter.py`. Handles the JSON schema enforcement.
+-   **Frontend:** React + Vite.
 
----
-
-# **API Endpoints**
-
-### **POST /mount**
-
-Initialize a folder and create its `.memory_index.db`.
-
-**Body:**
-
-```json
-{ "path": "G:/Photos" }
-```
-
----
-
-### **POST /scan**
-
-Scan folder, detect images, index new ones.
-
-**Body:**
-
-```json
-{ "path": "G:/Photos" }
-```
-
-**Response:**
-
-```json
-{
-  "status": "ok",
-  "scanned_path": "G:/Photos",
-  "new": 12,
-  "skipped": 0
-}
-```
-
----
-
-### **POST /search**
-
-Semantic search over image content + OCR text.
-
-**Body:**
-
-```json
-{ "query": "coffee house", "top_k": 4 }
-```
-
-**Response (example):**
-
-```json
-{
-  "results": [
-    {
-      "file_id": "4f3e...",
-      "path": "G:/Photos/central-park-coffeehouse.jpg",
-      "score": 0.59,
-      "summary": "central park coffeehouse",
-      "thumbnail_b64": "<base64>"
-    }
-  ]
-}
-```
-
----
-
-### **GET /thumbnail/{file_id}**
-
-Returns JPEG bytes for the stored thumbnail.
-
-Example (PowerShell):
-
-```powershell
-Invoke-WebRequest http://127.0.0.1:5500/thumbnail/<file_id> -OutFile thumb.jpg
-```
-
----
-
-# **Workflow Example**
-
-### **1. Mount**
-
-```bash
-POST /mount
-{ "path": "G:/Projects/RecallBox/testing_data" }
-```
-
-### **2. Scan**
-
-```bash
-POST /scan
-{ "path": "G:/Projects/RecallBox/testing_data" }
-```
-
-→ `"new": 5`
-
-### **3. Search**
-
-```bash
-POST /search
-{ "query": "coffee house", "top_k": 4 }
-```
-
-→ returns semantic matches + thumbnails
-
-### **4. Fetch thumbnail**
-
-```bash
-GET /thumbnail/<id> → thumb.jpg
-```
-
----
-
-# **Project Structure**
-
-```
-app/
-│
-├── main.py               # FastAPI entry
-├── db.py                 # SQLite layer
-├── indexer.py            # OCR, hashing, images, embeddings
-├── faiss_mgr.py          # FAISS vector index
-└── models/               # (if applicable)
-│
-requirements.txt
-README.md
-.gitignore
-```
-
----
-
-# **Roadmap**
-
-### **Phase 2 — User Interface**
-
-* Local web UI for browsing scans
-* Thumbnail grid with lazy loading
-* Search bar + instant results
-
-### **Phase 3 — Multi-drive memory**
-
-* Multiple indexed folders
-* Background scanning
-* Incremental re-indexing
-
-### **Phase 4 — Smart features**
-
-* Duplicate detection
-* Face clustering
-* Natural language tagging
-* Event grouping (e.g., “Trip to Japan 2020”)
-
----
-
-# **License**
-
-MIT (or whatever you choose).
