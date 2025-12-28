@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, FileText, Image as ImageIcon, ExternalLink, Copy, Check, Loader2, Eye, EyeOff } from 'lucide-react';
+import { X, Calendar, FileText, Image as ImageIcon, ExternalLink, Copy, Check, Loader2, EyeOff } from 'lucide-react';
 import { type MemoryDetail as MemoryDetailType, memoryApi } from '../api/memoryApi';
 import { format } from 'date-fns';
 

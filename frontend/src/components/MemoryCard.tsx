@@ -1,6 +1,6 @@
 import React from 'react';
 import { type Memory } from '../api/memoryApi';
-import { ImageIcon, CheckCircle, EyeOff, Tag } from 'lucide-react';
+import { ImageIcon, CheckCircle, EyeOff } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 

@@ -40,12 +40,13 @@ class VisionAdapter:
                 url = f"{self.endpoint_url}/v1/chat/completions"
                 # Handle Ollama specific path if needed, but Ollama now supports /v1/chat/completions
 
+                headers = {"Content-Type": "application/json"}
+                if self.api_key and self.api_key.strip():
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+
                 response = await client.post(
                     url,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self.api_key}"
-                    },
+                    headers=headers,
                     json=payload
                 )
 
@@ -93,9 +94,13 @@ class VisionAdapter:
                     "max_tokens": 100
                 }
 
+                headers = {"Content-Type": "application/json"}
+                if self.api_key and self.api_key.strip():
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+
                 response = await client.post(
                     url,
-                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+                    headers=headers,
                     json=payload
                 )
 

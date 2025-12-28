@@ -142,6 +142,12 @@ async def search(req: SearchRequest):
     c = conn.cursor()
     for r in results:
         fid, path, score = r["file_id"], r["path"], r["score"]
+        # Threshold filtering (L2 distance)
+        # 1.2 is a loose threshold for "relevant enough"
+        # 0.5 is very close. 1.5 is likely irrelevant.
+        if score > 1.4:
+            continue
+
         c.execute("SELECT file_id, path, created_at, exif_date, memory_summary, thumbnail, tags, vision_status FROM memories WHERE file_id=?", (fid,))
         row = c.fetchone()
         if not row:
@@ -255,10 +261,13 @@ async def test_vision_config(cfg: VisionConfig):
     try:
         import httpx
         url = f"{cfg.endpoint_url.rstrip('/')}/v1/models"
-        # Some backends like Ollama might not have /v1/modelsauth required or different structure
-        # Let's try listing models
+
+        headers = {}
+        if cfg.api_key and cfg.api_key.strip():
+            headers["Authorization"] = f"Bearer {cfg.api_key}"
+
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
                 return {"status": "ok", "details": f"Connected. Found {len(data.get('data', []))} models."}
