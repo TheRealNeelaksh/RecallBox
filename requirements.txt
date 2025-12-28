@@ -7,3 +7,5 @@ pytesseract
 python-multipart
 tqdm
 httpx
+pydantic
+httpx

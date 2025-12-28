@@ -69,7 +69,30 @@ def row_to_dict(row):
     # row expected: file_id, path, hash, created_at, modified_at, exif_date, ocr_text, caption, memory_summary, tags, vision_json, vision_status, embedding, thumbnail, schema_version...
     if not row:
         return None
-    # We need to match the select query columns exactly when calling this.
-    # But usually this helper is used when selecting * which is risky.
-    # Instead, let's assume the caller selects specific columns or we map explicitly.
-    pass
+
+    # Note: This is legacy and assumes a specific column order if used with SELECT *.
+    # We map what we know for backward compatibility, but callers should prefer explicit selects.
+    d = {
+        "file_id": row[0],
+        "path": row[1],
+        "hash": row[2],
+        "created_at": row[3],
+        "modified_at": row[4],
+        "exif_date": row[5],
+        "ocr_text": row[6],
+        "caption": row[7],
+        "memory_summary": row[8],
+        "tags": row[9],
+    }
+
+    # Check for extended columns if row is long enough
+    if len(row) > 10:
+        d["vision_json"] = row[10]
+    if len(row) > 11:
+        d["vision_status"] = row[11]
+    if len(row) > 12:
+        d["embedding"] = np.frombuffer(row[12], dtype=np.float32) if row[12] else None
+    if len(row) > 13:
+        d["thumbnail"] = row[13]
+
+    return d

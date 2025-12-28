@@ -52,7 +52,7 @@ export const ScanControls: React.FC<ScanControlsProps> = ({ mountedPath }) => {
             )}
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            {loading ? "Scanning..." : "Scan Drive"}
+            {loading ? "Scanning & Indexing..." : "Scan Drive"}
           </button>
 
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">

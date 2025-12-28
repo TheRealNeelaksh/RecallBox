@@ -106,7 +106,7 @@ export const VisionConfig: React.FC<VisionConfigProps> = ({ onClose }) => {
                     </div>
                 </div>
 
-                {status && (
+                {status && status.msg && (
                     <div className={`mt-4 p-3 rounded-md flex items-start gap-2 text-sm ${
                         status.type === 'error' ? 'bg-red-50 text-red-700' :
                         status.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'
