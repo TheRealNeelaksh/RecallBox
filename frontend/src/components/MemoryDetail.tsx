@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, FileText, Image as ImageIcon, ExternalLink, Copy, Check, Loader2 } from 'lucide-react';
+import { X, Calendar, FileText, Image as ImageIcon, ExternalLink, Copy, Check, Loader2, Eye, EyeOff } from 'lucide-react';
 import { type MemoryDetail as MemoryDetailType, memoryApi } from '../api/memoryApi';
 import { format } from 'date-fns';
 
@@ -14,12 +14,14 @@ export const MemoryDetail: React.FC<MemoryDetailProps> = ({ memoryId, thumbnailB
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<'info' | 'vision'>('info');
 
   useEffect(() => {
     if (!memoryId) return;
 
     setLoading(true);
     setError(null);
+    setTab('info');
 
     memoryApi.getMemory(memoryId)
       .then(setData)
@@ -103,6 +105,22 @@ export const MemoryDetail: React.FC<MemoryDetailProps> = ({ memoryId, thumbnailB
             </button>
           </div>
 
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200">
+              <button
+                  onClick={() => setTab('info')}
+                  className={`flex-1 py-3 text-sm font-medium border-b-2 ${tab === 'info' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                  Info
+              </button>
+              <button
+                  onClick={() => setTab('vision')}
+                  className={`flex-1 py-3 text-sm font-medium border-b-2 ${tab === 'vision' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              >
+                  Vision Inspection
+              </button>
+          </div>
+
           {loading && !data && (
             <div className="flex-1 flex items-center justify-center">
               <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -115,7 +133,7 @@ export const MemoryDetail: React.FC<MemoryDetailProps> = ({ memoryId, thumbnailB
             </div>
           )}
 
-          {data && (
+          {data && tab === 'info' && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
 
               {/* Summary */}
@@ -184,6 +202,33 @@ export const MemoryDetail: React.FC<MemoryDetailProps> = ({ memoryId, thumbnailB
                </div>
 
             </div>
+          )}
+
+          {data && tab === 'vision' && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Vision Status</h4>
+                      <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${
+                          data.vision_status === 'success' ? 'bg-green-100 text-green-700' :
+                          data.vision_status === 'failed' ? 'bg-red-100 text-red-700' :
+                          'bg-gray-100 text-gray-600'
+                      }`}>
+                          {data.vision_status || 'Pending / None'}
+                      </span>
+                  </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 font-mono text-xs overflow-x-auto">
+                      {data.vision_json ? (
+                          <pre>{JSON.stringify(JSON.parse(data.vision_json), null, 2)}</pre>
+                      ) : (
+                          <div className="text-gray-400 italic flex flex-col items-center py-8">
+                              <EyeOff className="w-8 h-8 mb-2" />
+                              <p>No vision data available.</p>
+                              <p className="text-[10px] mt-1">Check "Vision Configuration" and Rescan.</p>
+                          </div>
+                      )}
+                  </div>
+              </div>
           )}
         </div>
       </div>

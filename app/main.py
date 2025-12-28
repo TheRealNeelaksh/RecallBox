@@ -19,9 +19,10 @@ from datetime import datetime
 from .db import init_db, row_to_dict
 from .indexer import scan_and_index
 from .faiss_mgr import FaissManager
+from .vision.adapter import VisionAdapter
 
 APP_DIR = Path(__file__).resolve().parent
-app = FastAPI(title="Memory Brain - Phase1")
+app = FastAPI(title="Memory Brain - Phase1.5")
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 EMBED_DIM = 384
@@ -83,7 +84,19 @@ def scan(req: ScanRequest):
         raise HTTPException(status_code=400, detail="scan path does not exist")
     conn = state["conn"] or init_db(str(base.joinpath(".memory_index.db")))
     model = state["embed_model"]
-    added, skipped = scan_and_index(base, conn, model, rebuild=req.rescan, faiss_mgr=state.get("faiss"))
+
+    # Load vision config if available
+    vision_adapter = None
+    try:
+        c = conn.cursor()
+        c.execute("SELECT endpoint_url, model_name, api_key FROM vision_config WHERE id=1")
+        row = c.fetchone()
+        if row:
+            vision_adapter = VisionAdapter(row[0], row[1], row[2])
+    except Exception as e:
+        print(f"Failed to load vision config: {e}")
+
+    added, skipped = scan_and_index(base, conn, model, rebuild=req.rescan, faiss_mgr=state.get("faiss"), vision_adapter=vision_adapter)
     # After scan, ensure FAISS rebuilt if needed
     if state.get("faiss"):
         state["faiss"].build_from_db(conn)
@@ -96,29 +109,46 @@ class SearchRequest(BaseModel):
     date_to: Optional[str] = None
 
 @app.post("/search")
-def search(req: SearchRequest):
+async def search(req: SearchRequest):
     if not state.get("faiss") or state["faiss"].index.ntotal == 0:
         # try to build from DB
         if state.get("conn"):
             state["faiss"].build_from_db(state["conn"])
         else:
             raise HTTPException(status_code=400, detail="no index available; mount and scan first")
-    qvec = state["embed_model"].encode(req.query).astype("float32")
+
+    # Query rewriting
+    search_query = req.query
+    conn = state.get("conn")
+    if conn:
+        try:
+            c = conn.cursor()
+            c.execute("SELECT endpoint_url, model_name, api_key FROM vision_config WHERE id=1")
+            row = c.fetchone()
+            if row:
+                adapter = VisionAdapter(row[0], row[1], row[2])
+                expanded = await adapter.expand_query(req.query)
+                if expanded and len(expanded) > 5:
+                    print(f"Rewrote query '{req.query}' -> '{expanded}'")
+                    search_query = expanded
+        except Exception as e:
+            print(f"Query expansion failed: {e}")
+
+    qvec = state["embed_model"].encode(search_query).astype("float32")
     results = state["faiss"].search(qvec, topk=req.top_k)
     # optionally filter by date range
     out = []
-    conn = state["conn"]
+
     c = conn.cursor()
     for r in results:
         fid, path, score = r["file_id"], r["path"], r["score"]
-        c.execute("SELECT file_id, path, created_at, exif_date, memory_summary, thumbnail FROM memories WHERE file_id=?", (fid,))
+        c.execute("SELECT file_id, path, created_at, exif_date, memory_summary, thumbnail, tags, vision_status FROM memories WHERE file_id=?", (fid,))
         row = c.fetchone()
         if not row:
             continue
 
         # Manually unpack since we selected specific columns
-        # row: file_id(0), path(1), created_at(2), exif_date(3), memory_summary(4), thumbnail(5)
-        file_id, path_val, created_at, exif_date, summary, thumbnail_blob = row
+        file_id, path_val, created_at, exif_date, summary, thumbnail_blob, tags, vision_status = row
 
         # date filtering
         if req.date_from or req.date_to:
@@ -139,6 +169,8 @@ def search(req: SearchRequest):
             "path": path_val,
             "score": float(score),
             "summary": summary,
+            "tags": tags,
+            "vision_status": vision_status,
             "exif_date": exif_date,
             "thumbnail_b64": thumb_b64
         })
@@ -160,7 +192,7 @@ def memory(file_id: str):
     if not state.get("conn"):
         raise HTTPException(status_code=400, detail="No DB loaded")
     c = state["conn"].cursor()
-    c.execute("SELECT file_id, path, hash, created_at, modified_at, exif_date, ocr_text, caption, memory_summary, tags FROM memories WHERE file_id=?", (file_id,))
+    c.execute("SELECT file_id, path, hash, created_at, modified_at, exif_date, ocr_text, caption, memory_summary, tags, vision_json, vision_status FROM memories WHERE file_id=?", (file_id,))
     row = c.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="memory not found")
@@ -174,10 +206,69 @@ def memory(file_id: str):
         "ocr_text": row[6],
         "caption": row[7],
         "memory_summary": row[8],
-        "tags": row[9]
+        "tags": row[9],
+        "vision_json": row[10],
+        "vision_status": row[11]
     }
     return rec
 
 @app.get("/health")
 def health():
     return {"status": "ok", "mounted_path": state.get("mounted_path")}
+
+# --- Config Endpoints ---
+
+class VisionConfig(BaseModel):
+    endpoint_url: str
+    model_name: str
+    api_key: Optional[str] = "lm-studio"
+
+@app.get("/config/vision")
+def get_vision_config():
+    if not state.get("conn"):
+         # Allow getting empty config if not mounted, or raise?
+         # User might want to config before mount? No, DB is in mounted path.
+         raise HTTPException(status_code=400, detail="Mount drive first to configure vision")
+
+    c = state["conn"].cursor()
+    c.execute("SELECT endpoint_url, model_name, api_key FROM vision_config WHERE id=1")
+    row = c.fetchone()
+    if row:
+        return {"endpoint_url": row[0], "model_name": row[1], "api_key": row[2]}
+    return {"endpoint_url": "", "model_name": "", "api_key": ""}
+
+@app.post("/config/vision")
+def set_vision_config(cfg: VisionConfig):
+    if not state.get("conn"):
+        raise HTTPException(status_code=400, detail="Mount drive first")
+
+    c = state["conn"].cursor()
+    # upsert
+    c.execute("INSERT OR REPLACE INTO vision_config (id, endpoint_url, model_name, api_key) VALUES (1, ?, ?, ?)",
+              (cfg.endpoint_url, cfg.model_name, cfg.api_key))
+    state["conn"].commit()
+    return {"status": "saved"}
+
+@app.post("/config/vision/test")
+async def test_vision_config(cfg: VisionConfig):
+    # Try to reach the endpoint with a simple chat message
+    try:
+        import httpx
+        url = f"{cfg.endpoint_url.rstrip('/')}/v1/models"
+        # Some backends like Ollama might not have /v1/modelsauth required or different structure
+        # Let's try listing models
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"status": "ok", "details": f"Connected. Found {len(data.get('data', []))} models."}
+            else:
+                 # Fallback check for Ollama base
+                 if "ollama" in cfg.endpoint_url:
+                     resp = await client.get(f"{cfg.endpoint_url.rstrip('/')}/api/tags")
+                     if resp.status_code == 200:
+                         return {"status": "ok", "details": "Connected to Ollama."}
+
+            return {"status": "error", "details": f"Status {resp.status_code}: {resp.text}"}
+    except Exception as e:
+        return {"status": "error", "details": str(e)}
