@@ -135,5 +135,7 @@ class VisionAdapter:
             ],
             "temperature": 0.1,
             "max_tokens": 1000,
-            "response_format": {"type": "json_object"} # Helpful for backends that support it
+            # "response_format": {"type": "json_object"}
+            # Some local backends (like newer Ollama or LM Studio versions) might be strict about this.
+            # We already enforce JSON in the system prompt, so we can relax this to avoid 400 errors.
         }
