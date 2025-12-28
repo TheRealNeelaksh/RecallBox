@@ -6,3 +6,5 @@ faiss-cpu
 pytesseract
 python-multipart
 tqdm
+httpx
+pydantic

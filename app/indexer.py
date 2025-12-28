@@ -158,7 +158,8 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, visio
                 vision_res = asyncio.run(vision_adapter.analyze_image(str(p)))
                 if vision_res:
                     vision_status = "success"
-                    vision_json_str = vision_res.json()
+                    # Pydantic v2 use model_dump_json()
+                    vision_json_str = vision_res.model_dump_json()
                 else:
                     vision_status = "failed"
             except Exception as e:
@@ -172,7 +173,8 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, visio
         # 4. Derive Summary & Tags
         if vision_res:
             summary = vision_res.summary
-            tags = ", ".join(vision_res.objects[:5] + [vision_res.setting, vision_res.time_of_day])
+            tag_list = vision_res.objects[:5] + [vision_res.setting, vision_res.time_of_day]
+            tags = ", ".join([str(t) for t in tag_list if t])
             # Embed based on vision
             emb_text = f"{summary} {tags} {ocr}"
         else:

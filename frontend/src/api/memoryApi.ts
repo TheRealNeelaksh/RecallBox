@@ -146,6 +146,24 @@ export const memoryApi = {
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(cfg)
       });
+
+      if (!res.ok) {
+          // Attempt to read JSON error detail
+          try {
+              const errData = await res.json();
+              const msg = errData.detail || errData.details || res.statusText;
+              // Normalize list of errors (Pydantic validation)
+              if (Array.isArray(msg)) {
+                  throw new Error(msg.map((e: any) => e.msg).join(', '));
+              }
+              throw new Error(msg);
+          } catch (e: any) {
+              // If JSON parse fails or it was just thrown above
+              if (e.message) throw e;
+              throw new Error(`Connection test failed: ${res.status} ${res.statusText}`);
+          }
+      }
+
       return res.json();
   }
 };
