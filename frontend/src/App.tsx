@@ -129,6 +129,14 @@ function App() {
         {/* Top Controls */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
+            {!mountedPath ? (
+              <div className="h-full flex flex-col items-center justify-center p-8 bg-white border border-dashed border-gray-300 rounded-lg text-center text-gray-500">
+                <Brain className="w-12 h-12 mb-4 text-gray-300" />
+                <p className="text-lg font-medium text-gray-700">Welcome to RecallBox</p>
+                <p className="text-sm">Please mount a local photo directory to begin.</p>
+              </div>
+            ) : (
+             <>
              <SearchBar onSearch={(q) => handleSearch(q, dateFilters.from, dateFilters.to)} isLoading={loading} />
 
              {/* View Toggles & Filters */}
@@ -177,11 +185,13 @@ function App() {
                  <FiltersPanel onFilterChange={handleFilterChange} onClear={() => handleFilterChange()} />
                </div>
              )}
+             </>
+            )}
           </div>
 
           <div className="space-y-6">
             <DriveSelector onMount={handleMount} />
-            <ScanControls mountedPath={mountedPath} />
+            {mountedPath && <ScanControls mountedPath={mountedPath} />}
           </div>
         </div>
 
