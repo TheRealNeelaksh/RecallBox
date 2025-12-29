@@ -12,7 +12,7 @@ class VisionAdapter:
         # Check if it's Ollama or OpenAI compatible
         self.is_ollama = "ollama" in self.endpoint_url or "localhost:11434" in self.endpoint_url
 
-    async def analyze_image(self, image_path: str) -> Optional[VisionOutput]:
+    async def analyze_image(self, image_path: str, location: str = None, date: str = None) -> Optional[VisionOutput]:
         """
         Sends image to LLM and returns structured VisionOutput.
         Returns None if analysis fails.
@@ -31,7 +31,15 @@ class VisionAdapter:
                 "weather (if outdoor), time_of_day."
             )
 
+            context_str = ""
+            if location:
+                context_str += f"\nLocation: {location}"
+            if date:
+                context_str += f"\nDate: {date}"
+
             user_prompt = "Analyze this image."
+            if context_str:
+                user_prompt += f" Context:{context_str}. Use this context to identify specific landmarks or places."
 
             payload = self._build_payload(base64_image, system_prompt, user_prompt)
 
