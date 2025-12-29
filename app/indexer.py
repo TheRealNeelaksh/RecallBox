@@ -12,6 +12,7 @@ from tqdm import tqdm
 from .db import row_to_dict
 from datetime import datetime
 import json
+import reverse_geocoder as rg
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".tif", ".gif"}
 THUMB_SIZE = (256, 256)
@@ -75,6 +76,70 @@ def get_exif_date(path: Path):
                 return None
     except Exception:
         pass
+    return None
+
+def _convert_to_degrees(value):
+    """
+    Helper to convert GPS coordinates to degrees
+    """
+    d = value[0]
+    m = value[1]
+    s = value[2]
+    return d + (m / 60.0) + (s / 3600.0)
+
+def get_gps_from_exif(path: Path):
+    """
+    Extracts lat, lon from image EXIF if available.
+    Returns (lat, lon) tuple or None.
+    """
+    try:
+        im = Image.open(path)
+        exif = im.getexif()
+        if not exif:
+            return None
+
+        gps_info = exif.get_ifd(34853) # GPSInfo IFD
+        if not gps_info:
+            return None
+
+        # Tags: 1=LatRef, 2=Lat, 3=LonRef, 4=Lon
+        lat_ref = gps_info.get(1)
+        lat_raw = gps_info.get(2)
+        lon_ref = gps_info.get(3)
+        lon_raw = gps_info.get(4)
+
+        if lat_raw and lon_raw and lat_ref and lon_ref:
+            lat = _convert_to_degrees(lat_raw)
+            if lat_ref != 'N':
+                lat = -lat
+
+            lon = _convert_to_degrees(lon_raw)
+            if lon_ref != 'E':
+                lon = -lon
+
+            return lat, lon
+    except Exception:
+        pass
+    return None
+
+def get_location_name(lat, lon):
+    """
+    Returns 'City, Admin1, CC' or similar from coordinates using reverse_geocoder.
+    """
+    try:
+        # mode=1 means single result
+        res = rg.search((lat, lon), mode=1)
+        if res:
+            # res is a list of dicts. We want the first one.
+            # keys: lat, lon, name (City), admin1 (State/Region), admin2, cc (Country Code)
+            data = res[0]
+            city = data.get('name', '')
+            admin = data.get('admin1', '')
+            cc = data.get('cc', '')
+            parts = [p for p in [city, admin, cc] if p]
+            return ", ".join(parts)
+    except Exception as e:
+        print(f"Geocoding error: {e}")
     return None
 
 def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, vision_adapter=None):
@@ -145,6 +210,12 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, visio
         modified = datetime_iso(p)
         exif_date = get_exif_date(p) or created
 
+        # GPS & Location
+        latlon = get_gps_from_exif(p)
+        location_str = None
+        if latlon:
+            location_str = get_location_name(*latlon)
+
         # 2. Vision Analysis
         vision_res = None
         vision_status = "pending"
@@ -155,7 +226,7 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, visio
             # If `scan` is a sync function in FastAPI, it runs in a threadpool.
             # So `asyncio.run` creates a new loop for each call which is inefficient but works.
             try:
-                vision_res = asyncio.run(vision_adapter.analyze_image(str(p)))
+                vision_res = asyncio.run(vision_adapter.analyze_image(str(p), location=location_str, date=exif_date))
                 if vision_res:
                     vision_status = "success"
                     # Pydantic v2 use model_dump_json()
@@ -174,6 +245,8 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, visio
         if vision_res:
             summary = vision_res.summary
             tag_list = vision_res.objects[:5] + [vision_res.setting, vision_res.time_of_day]
+            if location_str:
+                tag_list.insert(0, location_str)
             tags = ", ".join([str(t) for t in tag_list if t])
             # Embed based on vision
             emb_text = f"{summary} {tags} {ocr}"
@@ -181,6 +254,9 @@ def scan_and_index(root: Path, conn, model, rebuild=False, faiss_mgr=None, visio
             # Fallback
             summary = summarize_text(ocr, caption)
             tags = "ocr-fallback"
+            if location_str:
+                tags += f", {location_str}"
+                summary += f" Location: {location_str}"
             emb_text = f"{caption} {summary} {ocr}"
 
         # 5. Embed
